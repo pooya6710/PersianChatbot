@@ -269,7 +269,7 @@ class AdminController
     {
         try {
             // بررسی دسترسی‌های ادمین
-            if (!$this->isAdmin()) {
+            if (!$this->isAdmin() || !$this->hasPermission('can_send_broadcasts')) {
                 return [
                     'success' => false,
                     'message' => 'شما دسترسی لازم برای ارسال پیام همگانی را ندارید.'
@@ -386,6 +386,7 @@ class AdminController
             $default_permissions = [
                 'can_view_stats' => true,
                 'can_send_message' => true,
+                'can_send_broadcasts' => true,
                 'can_lock_usernames' => true,
                 'can_manage_users' => true,
                 'can_manage_bot_settings' => true,
@@ -436,8 +437,10 @@ class AdminController
             
             // دریافت لیست کاربران ادمین
             $admins = DB::table('users')
-                ->where('type', 'admin')
-                ->orWhere('type', 'owner')
+                ->where(function ($query) {
+                    $query->where('type', 'admin')
+                          ->orWhere('type', 'owner');
+                })
                 ->select('id', 'telegram_id', 'username', 'first_name', 'last_name', 'type')
                 ->get();
             
