@@ -1,4 +1,4 @@
-modules = ["php"]
+modules = ["php", "postgresql-16"]
 
 [nix]
 channel = "stable-24_05"
@@ -16,6 +16,10 @@ author = "agent"
 task = "workflow.run"
 args = "PHP Server"
 
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "Main Telegram Bot"
+
 [[workflows.workflow]]
 name = "PHP Server"
 author = "agent"
@@ -24,6 +28,14 @@ author = "agent"
 task = "shell.exec"
 args = "php -S 0.0.0.0:5000"
 waitForPort = 5000
+
+[[workflows.workflow]]
+name = "Main Telegram Bot"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "php long_polling_bot.php"
 
 [deployment]
 run = ["sh", "-c", "php -S 0.0.0.0:5000"]
