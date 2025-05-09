@@ -834,6 +834,92 @@ class AdminController
     }
     
     /**
+     * فوروارد یک پیام به تمام کاربران ربات
+     * 
+     * @param int $from_chat_id آیدی چت مبدأ
+     * @param int $message_id آیدی پیام برای فوروارد
+     * @return array نتیجه عملیات
+     */
+    public function forwardMessageToAll($from_chat_id, $message_id)
+    {
+        try {
+            // بررسی دسترسی‌های ادمین
+            if (!$this->isAdmin() || !$this->hasPermission('can_send_broadcasts')) {
+                return [
+                    'success' => false,
+                    'message' => 'شما دسترسی لازم برای فوروارد همگانی را ندارید.'
+                ];
+            }
+            
+            // دریافت لیست کاربران
+            $users = DB::table('users')->select('id', 'telegram_id')->get();
+            $sentCount = 0;
+            $failedCount = 0;
+            
+            // فوروارد پیام به هر کاربر
+            foreach ($users as $user) {
+                try {
+                    // چک کردن آیدی تلگرام
+                    if (empty($user['telegram_id'])) {
+                        $failedCount++;
+                        continue;
+                    }
+                    
+                    // فوروارد پیام
+                    $url = "https://api.telegram.org/bot" . $_ENV['TELEGRAM_TOKEN'] . "/forwardMessage";
+                    $params = [
+                        'chat_id' => $user['telegram_id'],
+                        'from_chat_id' => $from_chat_id,
+                        'message_id' => $message_id,
+                        'disable_notification' => false
+                    ];
+                    
+                    $ch = curl_init($url);
+                    curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+                    curl_setopt($ch, CURLOPT_POSTFIELDS, http_build_query($params));
+                    curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
+                    $response = curl_exec($ch);
+                    $result = json_decode($response, true);
+                    curl_close($ch);
+                    
+                    if ($result && $result['ok']) {
+                        $sentCount++;
+                    } else {
+                        $failedCount++;
+                        $error = isset($result['description']) ? $result['description'] : 'خطای نامشخص';
+                        error_log("Failed to forward message to {$user['telegram_id']}: {$error}");
+                    }
+                    
+                    // کمی تأخیر برای جلوگیری از محدودیت‌های تلگرام
+                    usleep(200000); // 0.2 ثانیه تأخیر
+                } catch (\Exception $e) {
+                    $failedCount++;
+                    error_log("Failed to forward message to {$user['telegram_id']}: " . $e->getMessage());
+                }
+            }
+            
+            // ثبت در لاگ سیستم
+            echo "پیام همگانی به {$sentCount} کاربر فوروارد شد. {$failedCount} پیام ناموفق.\n";
+            
+            return [
+                'success' => true,
+                'sent_count' => $sentCount,
+                'failed_count' => $failedCount,
+                'message' => "پیام با موفقیت به {$sentCount} کاربر فوروارد شد."
+            ];
+            
+        } catch (\Exception $e) {
+            error_log("Error in forwardMessageToAll: " . $e->getMessage());
+            echo "خطا در فوروارد پیام همگانی: " . $e->getMessage() . "\n";
+            
+            return [
+                'success' => false,
+                'message' => "خطا در فوروارد پیام همگانی: " . $e->getMessage()
+            ];
+        }
+    }
+    
+    /**
      * ارسال پیام تلگرام (متد کمکی)
      */
     private function sendTelegramMessage($chatId, $message, $keyboard = null)
