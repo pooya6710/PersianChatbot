@@ -324,6 +324,313 @@ class AdminController
     }
     
     /**
+     * دریافت لیست ادمین‌ها
+     * @return array
+     */
+    public function getAdminsList()
+    {
+        try {
+            if (!$this->isAdmin()) {
+                return [
+                    'success' => false,
+                    'message' => 'شما دسترسی به این بخش را ندارید.'
+                ];
+            }
+            
+            // ایجاد جدول admin_permissions اگر وجود نداشت
+            $tableExists = DB::rawQuery("SELECT EXISTS (
+                SELECT FROM information_schema.tables 
+                WHERE table_schema = 'public'
+                AND table_name = 'admin_permissions'
+            ) as exists");
+            
+            if (!$tableExists[0]['exists']) {
+                DB::rawQuery("
+                    CREATE TABLE IF NOT EXISTS admin_permissions (
+                        id SERIAL PRIMARY KEY,
+                        user_id INTEGER NOT NULL,
+                        permissions JSON,
+                        created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                        updated_at TIMESTAMP
+                    )
+                ");
+            }
+            
+            // دریافت لیست کاربران ادمین
+            $admins = DB::table('users')
+                ->where('type', 'admin')
+                ->orWhere('type', 'owner')
+                ->select('id', 'telegram_id', 'username', 'first_name', 'last_name', 'type')
+                ->get();
+            
+            $result = [];
+            
+            // پردازش ادمین ها
+            foreach ($admins as $admin) {
+                $username = $admin['username'] ?? '';
+                $firstName = $admin['first_name'] ?? '';
+                $lastName = $admin['last_name'] ?? '';
+                $name = trim("$firstName $lastName");
+                
+                if (empty($name)) {
+                    $name = $username ? "@$username" : "Admin #" . $admin['id'];
+                }
+                
+                // دریافت دسترسی‌های ادمین
+                $permissions = [];
+                try {
+                    $perms = DB::table('admin_permissions')
+                        ->where('user_id', $admin['id'])
+                        ->first();
+                    
+                    if ($perms && isset($perms['permissions'])) {
+                        $permissions = json_decode($perms['permissions'], true) ?: [];
+                    }
+                } catch (\Exception $e) {
+                    error_log("Error loading permissions: " . $e->getMessage());
+                }
+                
+                $result[] = [
+                    'id' => $admin['id'],
+                    'telegram_id' => $admin['telegram_id'],
+                    'username' => $username,
+                    'name' => $name,
+                    'is_owner' => $admin['type'] === 'owner',
+                    'permissions' => $permissions
+                ];
+            }
+            
+            // اضافه کردن ادمین های اصلی
+            $owner_ids = [286420965, 6739124921]; // مالکین اصلی ربات
+            foreach ($owner_ids as $owner_id) {
+                // بررسی آیا در لیست قبلی نیست
+                $exists = false;
+                foreach ($result as $admin) {
+                    if ($admin['telegram_id'] == $owner_id) {
+                        $exists = true;
+                        break;
+                    }
+                }
+                
+                if (!$exists) {
+                    try {
+                        // دریافت اطلاعات کاربر از تلگرام
+                        $owner = DB::table('users')
+                            ->where('telegram_id', $owner_id)
+                            ->first();
+                        
+                        if ($owner) {
+                            $username = $owner['username'] ?? '';
+                            $firstName = $owner['first_name'] ?? '';
+                            $lastName = $owner['last_name'] ?? '';
+                            $name = trim("$firstName $lastName");
+                            
+                            if (empty($name)) {
+                                $name = $username ? "@$username" : "Super Admin";
+                            }
+                            
+                            $result[] = [
+                                'id' => $owner['id'] ?? 0,
+                                'telegram_id' => $owner_id,
+                                'username' => $username,
+                                'name' => $name,
+                                'is_owner' => true,
+                                'permissions' => []
+                            ];
+                        }
+                    } catch (\Exception $e) {
+                        error_log("Error loading owner: " . $e->getMessage());
+                    }
+                }
+            }
+            
+            return [
+                'success' => true,
+                'message' => 'لیست ادمین‌ها با موفقیت دریافت شد.',
+                'admins' => $result
+            ];
+            
+        } catch (\Exception $e) {
+            error_log("Error in getAdminsList: " . $e->getMessage());
+            return [
+                'success' => false,
+                'message' => 'خطا در دریافت لیست ادمین‌ها: ' . $e->getMessage()
+            ];
+        }
+    }
+    
+    /**
+     * اضافه کردن ادمین جدید
+     * @param string $identifier شناسه کاربر (آیدی تلگرام یا نام کاربری)
+     * @return array
+     */
+    public function addAdmin($identifier)
+    {
+        try {
+            if (!$this->isAdmin()) {
+                return [
+                    'success' => false,
+                    'message' => 'شما دسترسی به این بخش را ندارید.'
+                ];
+            }
+            
+            // حذف @ از ابتدای نام کاربری
+            if (substr($identifier, 0, 1) === '@') {
+                $identifier = substr($identifier, 1);
+            }
+            
+            // جستجوی کاربر بر اساس آیدی تلگرام یا نام کاربری
+            $user = null;
+            if (is_numeric($identifier)) {
+                $user = DB::table('users')
+                    ->where('telegram_id', $identifier)
+                    ->first();
+            } else {
+                $user = DB::table('users')
+                    ->where('username', $identifier)
+                    ->first();
+            }
+            
+            // بررسی وجود کاربر
+            if (!$user) {
+                return [
+                    'success' => false,
+                    'message' => 'کاربر مورد نظر یافت نشد. لطفاً آیدی تلگرام یا نام کاربری صحیح را وارد کنید.'
+                ];
+            }
+            
+            // بررسی آیا کاربر قبلاً ادمین است
+            if ($user['type'] === 'admin' || $user['type'] === 'owner') {
+                return [
+                    'success' => false,
+                    'message' => 'کاربر مورد نظر در حال حاضر ادمین است.'
+                ];
+            }
+            
+            // تغییر نوع کاربر به ادمین
+            DB::table('users')
+                ->where('id', $user['id'])
+                ->update(['type' => 'admin']);
+                
+            // نام کاربر برای نمایش
+            $username = $user['username'] ?? '';
+            $name = trim(($user['first_name'] ?? '') . ' ' . ($user['last_name'] ?? ''));
+            
+            if (empty($name)) {
+                $name = $username ? "@$username" : "کاربر #" . $user['id'];
+            }
+            
+            return [
+                'success' => true,
+                'message' => "✅ کاربر «$name» با موفقیت به عنوان ادمین افزوده شد.",
+                'user' => [
+                    'id' => $user['id'],
+                    'telegram_id' => $user['telegram_id'],
+                    'username' => $username,
+                    'name' => $name
+                ]
+            ];
+            
+        } catch (\Exception $e) {
+            error_log("Error in addAdmin: " . $e->getMessage());
+            return [
+                'success' => false,
+                'message' => 'خطا در افزودن ادمین: ' . $e->getMessage()
+            ];
+        }
+    }
+    
+    /**
+     * حذف ادمین
+     * @param string $identifier شناسه کاربر (آیدی تلگرام یا نام کاربری)
+     * @return array
+     */
+    public function removeAdmin($identifier)
+    {
+        try {
+            if (!$this->isAdmin()) {
+                return [
+                    'success' => false,
+                    'message' => 'شما دسترسی به این بخش را ندارید.'
+                ];
+            }
+            
+            // حذف @ از ابتدای نام کاربری
+            if (substr($identifier, 0, 1) === '@') {
+                $identifier = substr($identifier, 1);
+            }
+            
+            // جستجوی کاربر بر اساس آیدی تلگرام یا نام کاربری
+            $user = null;
+            if (is_numeric($identifier)) {
+                $user = DB::table('users')
+                    ->where('telegram_id', $identifier)
+                    ->first();
+            } else {
+                $user = DB::table('users')
+                    ->where('username', $identifier)
+                    ->first();
+            }
+            
+            // بررسی وجود کاربر
+            if (!$user) {
+                return [
+                    'success' => false,
+                    'message' => 'کاربر مورد نظر یافت نشد. لطفاً آیدی تلگرام یا نام کاربری صحیح را وارد کنید.'
+                ];
+            }
+            
+            // بررسی آیا کاربر ادمین اصلی است
+            $owner_ids = [286420965, 6739124921];
+            if (in_array($user['telegram_id'], $owner_ids)) {
+                return [
+                    'success' => false,
+                    'message' => 'امکان حذف ادمین اصلی وجود ندارد.'
+                ];
+            }
+            
+            // بررسی آیا کاربر ادمین است
+            if ($user['type'] !== 'admin' && $user['type'] !== 'owner') {
+                return [
+                    'success' => false,
+                    'message' => 'کاربر مورد نظر ادمین نیست.'
+                ];
+            }
+            
+            // تغییر نوع کاربر به کاربر عادی
+            DB::table('users')
+                ->where('id', $user['id'])
+                ->update(['type' => 'user']);
+                
+            // نام کاربر برای نمایش
+            $username = $user['username'] ?? '';
+            $name = trim(($user['first_name'] ?? '') . ' ' . ($user['last_name'] ?? ''));
+            
+            if (empty($name)) {
+                $name = $username ? "@$username" : "کاربر #" . $user['id'];
+            }
+            
+            return [
+                'success' => true,
+                'message' => "✅ کاربر «$name» با موفقیت از لیست ادمین‌ها حذف شد.",
+                'user' => [
+                    'id' => $user['id'],
+                    'telegram_id' => $user['telegram_id'],
+                    'username' => $username,
+                    'name' => $name
+                ]
+            ];
+            
+        } catch (\Exception $e) {
+            error_log("Error in removeAdmin: " . $e->getMessage());
+            return [
+                'success' => false,
+                'message' => 'خطا در حذف ادمین: ' . $e->getMessage()
+            ];
+        }
+    }
+    
+    /**
      * ارسال پیام تلگرام (متد کمکی)
      */
     private function sendTelegramMessage($chatId, $message, $keyboard = null)
