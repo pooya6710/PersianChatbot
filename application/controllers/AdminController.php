@@ -920,6 +920,175 @@ class AdminController
     }
     
     /**
+     * قفل کردن یک نام کاربری خاص
+     * 
+     * @param string $username نام کاربری برای قفل کردن
+     * @return array نتیجه عملیات
+     */
+    public function lockUsername($username)
+    {
+        try {
+            // بررسی دسترسی‌های ادمین
+            if (!$this->isAdmin() || !$this->hasPermission('can_lock_usernames')) {
+                return [
+                    'success' => false,
+                    'message' => 'شما دسترسی لازم برای قفل کردن نام کاربری را ندارید.'
+                ];
+            }
+            
+            // حذف @ از ابتدای نام کاربری اگر وجود داشت
+            if (substr($username, 0, 1) === '@') {
+                $username = substr($username, 1);
+            }
+            
+            // تمیز کردن نام کاربری
+            $username = trim(strtolower($username));
+            
+            // بررسی اعتبار نام کاربری
+            if (!preg_match('/^[a-z0-9_]{5,32}$/', $username)) {
+                return [
+                    'success' => false,
+                    'message' => 'نام کاربری وارد شده معتبر نیست. نام کاربری باید شامل حروف انگلیسی، اعداد و _ باشد (حداقل 5 و حداکثر 32 کاراکتر).'
+                ];
+            }
+            
+            // اطمینان از وجود جدول locked_usernames
+            $this->initializeRequiredTables();
+            $tableExists = DB::rawQuery("SELECT EXISTS (
+                SELECT FROM information_schema.tables 
+                WHERE table_schema = 'public'
+                AND table_name = 'locked_usernames'
+            ) as exists");
+            
+            if (!$tableExists[0]['exists']) {
+                DB::rawQuery("
+                    CREATE TABLE IF NOT EXISTS locked_usernames (
+                        id SERIAL PRIMARY KEY,
+                        username VARCHAR(32) UNIQUE NOT NULL,
+                        locked_by INTEGER NOT NULL,
+                        created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+                    )
+                ");
+            }
+            
+            // بررسی آیا این نام کاربری قبلاً قفل شده است
+            $existingLock = DB::table('locked_usernames')
+                ->where('username', $username)
+                ->first();
+                
+            if ($existingLock) {
+                return [
+                    'success' => false,
+                    'message' => "نام کاربری «{$username}» قبلاً قفل شده است."
+                ];
+            }
+            
+            // قفل کردن نام کاربری
+            DB::table('locked_usernames')->insert([
+                'username' => $username,
+                'locked_by' => $this->user_id,
+                'created_at' => date('Y-m-d H:i:s')
+            ]);
+            
+            return [
+                'success' => true,
+                'message' => "✅ نام کاربری «{$username}» با موفقیت قفل شد."
+            ];
+            
+        } catch (\Exception $e) {
+            error_log("Error in lockUsername: " . $e->getMessage());
+            return [
+                'success' => false,
+                'message' => "خطا در قفل کردن نام کاربری: " . $e->getMessage()
+            ];
+        }
+    }
+    
+    /**
+     * قفل کردن یک گروه یا کانال
+     * 
+     * @param string $chatId آیدی یا لینک گروه/کانال
+     * @param string $type نوع (گروه یا کانال)
+     * @return array نتیجه عملیات
+     */
+    public function lockChat($chatId, $type = 'group')
+    {
+        try {
+            // بررسی دسترسی‌های ادمین
+            if (!$this->isAdmin() || !$this->hasPermission('can_lock_groups')) {
+                return [
+                    'success' => false,
+                    'message' => 'شما دسترسی لازم برای قفل کردن گروه/کانال را ندارید.'
+                ];
+            }
+            
+            // تمیز کردن آیدی چت
+            $chatId = trim($chatId);
+            
+            // اگر لینک است، استخراج آیدی
+            if (strpos($chatId, 'https://t.me/') === 0) {
+                $chatId = str_replace('https://t.me/', '', $chatId);
+            }
+            if (strpos($chatId, '@') === 0) {
+                $chatId = substr($chatId, 1);
+            }
+            
+            // اطمینان از وجود جدول locked_chats
+            $this->initializeRequiredTables();
+            $tableExists = DB::rawQuery("SELECT EXISTS (
+                SELECT FROM information_schema.tables 
+                WHERE table_schema = 'public'
+                AND table_name = 'locked_chats'
+            ) as exists");
+            
+            if (!$tableExists[0]['exists']) {
+                DB::rawQuery("
+                    CREATE TABLE IF NOT EXISTS locked_chats (
+                        id SERIAL PRIMARY KEY,
+                        chat_id VARCHAR(255) NOT NULL,
+                        chat_type VARCHAR(20) NOT NULL,
+                        locked_by INTEGER NOT NULL,
+                        created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                        UNIQUE(chat_id)
+                    )
+                ");
+            }
+            
+            // بررسی آیا این گروه/کانال قبلاً قفل شده است
+            $existingLock = DB::table('locked_chats')
+                ->where('chat_id', $chatId)
+                ->first();
+                
+            if ($existingLock) {
+                return [
+                    'success' => false,
+                    'message' => "این " . ($type == 'channel' ? 'کانال' : 'گروه') . " قبلاً قفل شده است."
+                ];
+            }
+            
+            // قفل کردن گروه/کانال
+            DB::table('locked_chats')->insert([
+                'chat_id' => $chatId,
+                'chat_type' => $type,
+                'locked_by' => $this->user_id,
+                'created_at' => date('Y-m-d H:i:s')
+            ]);
+            
+            return [
+                'success' => true,
+                'message' => "✅ " . ($type == 'channel' ? 'کانال' : 'گروه') . " با موفقیت قفل شد."
+            ];
+            
+        } catch (\Exception $e) {
+            error_log("Error in lockChat: " . $e->getMessage());
+            return [
+                'success' => false,
+                'message' => "خطا در قفل کردن " . ($type == 'channel' ? 'کانال' : 'گروه') . ": " . $e->getMessage()
+            ];
+        }
+    }
+    
+    /**
      * ارسال پیام تلگرام (متد کمکی)
      */
     private function sendTelegramMessage($chatId, $message, $keyboard = null)

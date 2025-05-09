@@ -152,6 +152,75 @@ while (true) {
                             answerCallbackQuery($_ENV['TELEGRAM_TOKEN'], $callback_query['id']);
                             break;
                             
+                        case 'lock_username':
+                            // قفل آیدی
+                            if (!$adminController->hasPermission('can_lock_usernames')) {
+                                answerCallbackQuery($_ENV['TELEGRAM_TOKEN'], $callback_query['id'], "⚠️ شما دسترسی لازم برای این بخش را ندارید.");
+                                break;
+                            }
+                            
+                            $message = "🔒 *قفل آیدی*\n\n";
+                            $message .= "لطفاً نام کاربری که می‌خواهید قفل کنید را وارد کنید (با یا بدون @):\n";
+                            $message .= "این نام کاربری برای همه کاربران قفل خواهد شد و کسی نمی‌تواند آن را انتخاب کند.";
+                            
+                            // کیبورد لغو
+                            $cancel_keyboard = json_encode([
+                                'keyboard' => [
+                                    [['text' => 'لغو ❌']]
+                                ],
+                                'resize_keyboard' => true
+                            ]);
+                            
+                            sendMessageWithKeyboard($_ENV['TELEGRAM_TOKEN'], $chat_id, $message, $cancel_keyboard);
+                            
+                            // ذخیره وضعیت ادمین
+                            $userState = [
+                                'state' => 'admin_panel',
+                                'step' => 'waiting_for_username_to_lock'
+                            ];
+                            \Application\Model\DB::table('users')
+                                ->where('telegram_id', $user_id)
+                                ->update(['state' => json_encode($userState)]);
+                                
+                            echo "درخواست قفل آیدی دریافت شد\n";
+                            answerCallbackQuery($_ENV['TELEGRAM_TOKEN'], $callback_query['id']);
+                            break;
+                            
+                        case 'lock_chat':
+                            // قفل گروه/کانال
+                            if (!$adminController->hasPermission('can_lock_groups')) {
+                                answerCallbackQuery($_ENV['TELEGRAM_TOKEN'], $callback_query['id'], "⚠️ شما دسترسی لازم برای این بخش را ندارید.");
+                                break;
+                            }
+                            
+                            // انتخاب نوع (گروه یا کانال)
+                            $message = "🔒 *قفل گروه/کانال*\n\n";
+                            $message .= "لطفاً نوع چت را انتخاب کنید:";
+                            
+                            // کیبورد انتخاب نوع
+                            $type_keyboard = json_encode([
+                                'keyboard' => [
+                                    [['text' => '👥 گروه'], ['text' => '📢 کانال']],
+                                    [['text' => 'لغو ❌']]
+                                ],
+                                'resize_keyboard' => true
+                            ]);
+                            
+                            sendMessageWithKeyboard($_ENV['TELEGRAM_TOKEN'], $chat_id, $message, $type_keyboard);
+                            
+                            // ذخیره وضعیت ادمین
+                            $userState = [
+                                'state' => 'admin_panel',
+                                'step' => 'waiting_for_chat_type'
+                            ];
+                            \Application\Model\DB::table('users')
+                                ->where('telegram_id', $user_id)
+                                ->update(['state' => json_encode($userState)]);
+                                
+                            echo "درخواست قفل گروه/کانال دریافت شد\n";
+                            answerCallbackQuery($_ENV['TELEGRAM_TOKEN'], $callback_query['id']);
+                            break;
+                            
                         case 'stats':
                             // نمایش آمار ربات
                             $stats_result = $adminController->getBotStats();
@@ -200,6 +269,10 @@ while (true) {
                                     [
                                         ['text' => '📨 پیام همگانی', 'callback_data' => 'admin:broadcast'],
                                         ['text' => '📬 فوروارد همگانی', 'callback_data' => 'admin:forward']
+                                    ],
+                                    [
+                                        ['text' => '🔒 قفل آیدی', 'callback_data' => 'admin:lock_username'],
+                                        ['text' => '🔒 قفل گروه/کانال', 'callback_data' => 'admin:lock_chat']
                                     ],
                                     [
                                         ['text' => '🎮 مدیریت بازی‌ها', 'callback_data' => 'admin:manage_games'],
@@ -1568,6 +1641,220 @@ $message .= "https://t.me/" . $botUsername . "?start=" . $userData['id'] . "\n\n
                     
                     // پردازش مراحل مختلف پنل مدیریت
                     switch ($userState['step']) {
+                        // منتظر دریافت نام کاربری برای قفل کردن
+                        case 'waiting_for_username_to_lock':
+                            // بررسی آیا کاربر درخواست لغو کرده است
+                            if (strpos($text, 'لغو') !== false) {
+                                // بازگشت به منوی پنل مدیریت
+                                $admin_menu = "🛠️ *پنل مدیریت*\n\n";
+                                $admin_menu .= "به پنل مدیریت ربات خوش آمدید. لطفاً یکی از گزینه‌های زیر را انتخاب کنید:";
+                                
+                                // کیبورد مدیریت
+                                $admin_keyboard = json_encode([
+                                    'keyboard' => [
+                                        [['text' => '📊 آمار ربات']],
+                                        [['text' => '📨 پیام همگانی'], ['text' => '📤 فوروارد همگانی']],
+                                        [['text' => '👥 مدیریت ادمین‌ها']],
+                                        [['text' => '⚙️ تنظیمات ربات']],
+                                        [['text' => '🔙 بازگشت به منوی اصلی']]
+                                    ],
+                                    'resize_keyboard' => true
+                                ]);
+                                
+                                sendMessageWithKeyboard($_ENV['TELEGRAM_TOKEN'], $chat_id, $admin_menu, $admin_keyboard);
+                                
+                                // تغییر وضعیت کاربر
+                                $userState['step'] = 'main_menu';
+                                \Application\Model\DB::table('users')
+                                    ->where('telegram_id', $user_id)
+                                    ->update(['state' => json_encode($userState)]);
+                                    
+                                echo "درخواست قفل آیدی لغو شد\n";
+                                continue 2;
+                            }
+                            
+                            // نام کاربری برای قفل کردن
+                            $username = $text;
+                            
+                            // استفاده از کلاس AdminController
+                            require_once __DIR__ . '/application/controllers/AdminController.php';
+                            $adminController = new \application\controllers\AdminController($user_id);
+                            
+                            // قفل کردن نام کاربری
+                            $result = $adminController->lockUsername($username);
+                            
+                            // ارسال نتیجه
+                            sendMessage($_ENV['TELEGRAM_TOKEN'], $chat_id, $result['message']);
+                            
+                            // بازگشت به منوی مدیریت
+                            $admin_menu = "🔐 *قفل آیدی*\n\n";
+                            $admin_menu .= "برای قفل کردن آیدی دیگر، دوباره «قفل آیدی» را انتخاب کنید.";
+                            
+                            $admin_keyboard = json_encode([
+                                'keyboard' => [
+                                    [['text' => '📊 آمار ربات']],
+                                    [['text' => '📨 پیام همگانی'], ['text' => '📤 فوروارد همگانی']],
+                                    [['text' => '🔒 قفل آیدی'], ['text' => '🔒 قفل گروه/کانال']],
+                                    [['text' => '👥 مدیریت ادمین‌ها']],
+                                    [['text' => '⚙️ تنظیمات ربات']],
+                                    [['text' => '🔙 بازگشت به منوی اصلی']]
+                                ],
+                                'resize_keyboard' => true
+                            ]);
+                            
+                            sendMessageWithKeyboard($_ENV['TELEGRAM_TOKEN'], $chat_id, $admin_menu, $admin_keyboard);
+                            
+                            // تغییر وضعیت کاربر
+                            $userState['step'] = 'main_menu';
+                            \Application\Model\DB::table('users')
+                                ->where('telegram_id', $user_id)
+                                ->update(['state' => json_encode($userState)]);
+                                
+                            echo "قفل آیدی «{$username}» پردازش شد\n";
+                            break;
+                        
+                        // منتظر انتخاب نوع چت (گروه یا کانال) برای قفل کردن
+                        case 'waiting_for_chat_type':
+                            // بررسی آیا کاربر درخواست لغو کرده است
+                            if (strpos($text, 'لغو') !== false) {
+                                // بازگشت به منوی پنل مدیریت
+                                $admin_menu = "🛠️ *پنل مدیریت*\n\n";
+                                $admin_menu .= "به پنل مدیریت ربات خوش آمدید. لطفاً یکی از گزینه‌های زیر را انتخاب کنید:";
+                                
+                                // کیبورد مدیریت
+                                $admin_keyboard = json_encode([
+                                    'keyboard' => [
+                                        [['text' => '📊 آمار ربات']],
+                                        [['text' => '📨 پیام همگانی'], ['text' => '📤 فوروارد همگانی']],
+                                        [['text' => '🔒 قفل آیدی'], ['text' => '🔒 قفل گروه/کانال']],
+                                        [['text' => '👥 مدیریت ادمین‌ها']],
+                                        [['text' => '⚙️ تنظیمات ربات']],
+                                        [['text' => '🔙 بازگشت به منوی اصلی']]
+                                    ],
+                                    'resize_keyboard' => true
+                                ]);
+                                
+                                sendMessageWithKeyboard($_ENV['TELEGRAM_TOKEN'], $chat_id, $admin_menu, $admin_keyboard);
+                                
+                                // تغییر وضعیت کاربر
+                                $userState['step'] = 'main_menu';
+                                \Application\Model\DB::table('users')
+                                    ->where('telegram_id', $user_id)
+                                    ->update(['state' => json_encode($userState)]);
+                                    
+                                echo "درخواست قفل گروه/کانال لغو شد\n";
+                                continue 2;
+                            }
+                            
+                            // تعیین نوع چت
+                            $chatType = 'group'; // پیش‌فرض
+                            if (strpos($text, 'کانال') !== false) {
+                                $chatType = 'channel';
+                            }
+                            
+                            // درخواست آیدی چت
+                            $message = "🔒 *قفل " . ($chatType == 'channel' ? 'کانال' : 'گروه') . "*\n\n";
+                            $message .= "لطفاً آیدی یا لینک " . ($chatType == 'channel' ? 'کانال' : 'گروه') . " را وارد کنید.\n";
+                            $message .= "می‌توانید به یکی از این فرمت‌ها وارد کنید:\n";
+                            $message .= "• @channelname\n";
+                            $message .= "• channelname\n";
+                            $message .= "• https://t.me/channelname";
+                            
+                            // کیبورد لغو
+                            $cancel_keyboard = json_encode([
+                                'keyboard' => [
+                                    [['text' => 'لغو ❌']]
+                                ],
+                                'resize_keyboard' => true
+                            ]);
+                            
+                            sendMessageWithKeyboard($_ENV['TELEGRAM_TOKEN'], $chat_id, $message, $cancel_keyboard);
+                            
+                            // ذخیره وضعیت و نوع چت
+                            $userState['step'] = 'waiting_for_chat_to_lock';
+                            $userState['chat_type'] = $chatType;
+                            \Application\Model\DB::table('users')
+                                ->where('telegram_id', $user_id)
+                                ->update(['state' => json_encode($userState)]);
+                                
+                            echo "نوع چت انتخاب شد: " . ($chatType == 'channel' ? 'کانال' : 'گروه') . "\n";
+                            break;
+                        
+                        // منتظر دریافت آیدی گروه/کانال برای قفل کردن
+                        case 'waiting_for_chat_to_lock':
+                            // بررسی آیا کاربر درخواست لغو کرده است
+                            if (strpos($text, 'لغو') !== false) {
+                                // بازگشت به منوی پنل مدیریت
+                                $admin_menu = "🛠️ *پنل مدیریت*\n\n";
+                                $admin_menu .= "به پنل مدیریت ربات خوش آمدید. لطفاً یکی از گزینه‌های زیر را انتخاب کنید:";
+                                
+                                // کیبورد مدیریت
+                                $admin_keyboard = json_encode([
+                                    'keyboard' => [
+                                        [['text' => '📊 آمار ربات']],
+                                        [['text' => '📨 پیام همگانی'], ['text' => '📤 فوروارد همگانی']],
+                                        [['text' => '👥 مدیریت ادمین‌ها']],
+                                        [['text' => '⚙️ تنظیمات ربات']],
+                                        [['text' => '🔙 بازگشت به منوی اصلی']]
+                                    ],
+                                    'resize_keyboard' => true
+                                ]);
+                                
+                                sendMessageWithKeyboard($_ENV['TELEGRAM_TOKEN'], $chat_id, $admin_menu, $admin_keyboard);
+                                
+                                // تغییر وضعیت کاربر
+                                $userState['step'] = 'main_menu';
+                                \Application\Model\DB::table('users')
+                                    ->where('telegram_id', $user_id)
+                                    ->update(['state' => json_encode($userState)]);
+                                    
+                                echo "درخواست قفل گروه/کانال لغو شد\n";
+                                continue 2;
+                            }
+                            
+                            // آیدی گروه/کانال برای قفل کردن
+                            $chatId = $text;
+                            
+                            // نوع چت (گروه یا کانال)
+                            $chatType = $userState['chat_type'] ?? 'group';
+                            
+                            // استفاده از کلاس AdminController
+                            require_once __DIR__ . '/application/controllers/AdminController.php';
+                            $adminController = new \application\controllers\AdminController($user_id);
+                            
+                            // قفل کردن گروه/کانال
+                            $result = $adminController->lockChat($chatId, $chatType);
+                            
+                            // ارسال نتیجه
+                            sendMessage($_ENV['TELEGRAM_TOKEN'], $chat_id, $result['message']);
+                            
+                            // بازگشت به منوی مدیریت
+                            $admin_menu = "🔐 *قفل گروه/کانال*\n\n";
+                            $admin_menu .= "برای قفل کردن گروه/کانال دیگر، دوباره «قفل گروه/کانال» را انتخاب کنید.";
+                            
+                            $admin_keyboard = json_encode([
+                                'keyboard' => [
+                                    [['text' => '📊 آمار ربات']],
+                                    [['text' => '📨 پیام همگانی'], ['text' => '📤 فوروارد همگانی']],
+                                    [['text' => '🔒 قفل آیدی'], ['text' => '🔒 قفل گروه/کانال']],
+                                    [['text' => '👥 مدیریت ادمین‌ها']],
+                                    [['text' => '⚙️ تنظیمات ربات']],
+                                    [['text' => '🔙 بازگشت به منوی اصلی']]
+                                ],
+                                'resize_keyboard' => true
+                            ]);
+                            
+                            sendMessageWithKeyboard($_ENV['TELEGRAM_TOKEN'], $chat_id, $admin_menu, $admin_keyboard);
+                            
+                            // تغییر وضعیت کاربر
+                            $userState['step'] = 'main_menu';
+                            \Application\Model\DB::table('users')
+                                ->where('telegram_id', $user_id)
+                                ->update(['state' => json_encode($userState)]);
+                                
+                            echo "قفل گروه/کانال «{$chatId}» پردازش شد\n";
+                            break;
+                            
                         // منتظر دریافت پیام برای فوروارد همگانی
                         case 'waiting_for_forward_message':
                             // بررسی آیا کاربر درخواست لغو کرده است
@@ -4178,6 +4465,49 @@ $message .= "https://t.me/" . $botUsername . "?start=" . $userData['id'] . "\n\n
                     echo "درخواست قفل آیدی دریافت شد\n";
                 } catch (Exception $e) {
                     echo "خطا در پردازش قفل آیدی: " . $e->getMessage() . "\n";
+                    sendMessage($_ENV['TELEGRAM_TOKEN'], $chat_id, "⚠️ خطا در پردازش درخواست: " . $e->getMessage());
+                }
+            }
+            
+            // قفل گروه/کانال
+            else if (strpos($text, 'قفل گروه/کانال') !== false) {
+                try {
+                    require_once __DIR__ . '/application/controllers/AdminController.php';
+                    $adminController = new \application\controllers\AdminController($user_id);
+                    
+                    // بررسی دسترسی ادمین
+                    if (!$adminController->isAdmin() || !$adminController->hasPermission('can_lock_groups')) {
+                        sendMessage($_ENV['TELEGRAM_TOKEN'], $chat_id, "⚠️ شما دسترسی لازم برای این بخش را ندارید.");
+                        continue;
+                    }
+                    
+                    // انتخاب نوع (گروه یا کانال)
+                    $message = "🔒 *قفل گروه/کانال*\n\n";
+                    $message .= "لطفاً نوع چت را انتخاب کنید:";
+                    
+                    // کیبورد انتخاب نوع
+                    $type_keyboard = json_encode([
+                        'keyboard' => [
+                            [['text' => '👥 گروه'], ['text' => '📢 کانال']],
+                            [['text' => 'لغو ❌']]
+                        ],
+                        'resize_keyboard' => true
+                    ]);
+                    
+                    sendMessageWithKeyboard($_ENV['TELEGRAM_TOKEN'], $chat_id, $message, $type_keyboard);
+                    
+                    // ذخیره وضعیت ادمین
+                    $userState = [
+                        'state' => 'admin_panel',
+                        'step' => 'waiting_for_chat_type'
+                    ];
+                    \Application\Model\DB::table('users')
+                        ->where('telegram_id', $user_id)
+                        ->update(['state' => json_encode($userState)]);
+                        
+                    echo "درخواست قفل گروه/کانال دریافت شد\n";
+                } catch (Exception $e) {
+                    echo "خطا در پردازش قفل گروه/کانال: " . $e->getMessage() . "\n";
                     sendMessage($_ENV['TELEGRAM_TOKEN'], $chat_id, "⚠️ خطا در پردازش درخواست: " . $e->getMessage());
                 }
             }
