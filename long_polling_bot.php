@@ -1255,7 +1255,9 @@ while (true) {
                     $botInfo = getBotInfo($_ENV['TELEGRAM_TOKEN']);
                     $botUsername = isset($botInfo['username']) ? $botInfo['username'] : 'your_bot';
                     
-                    $message .= "`https://t.me/" . $botUsername . "?start=" . $userData['id'] . "`\n\n";
+                    // ساخت لینک رفرال
+                    $referralLink = "https://t.me/" . $botUsername . "?start=" . $userData['id'];
+                    $message .= "`" . $referralLink . "`\n\n";
                     $message .= "💰 *سیستم پاداش دهی رفرال:*\n";
                     $message .= "• عضویت اولیه: 0.5 دلتا کوین\n";
                     $message .= "• اولین برد: 1.5 دلتا کوین\n";

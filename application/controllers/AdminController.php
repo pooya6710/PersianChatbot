@@ -709,6 +709,128 @@ class AdminController
     }
     
     /**
+     * بررسی وضعیت فعال بودن ربات
+     * @return bool وضعیت فعال بودن ربات
+     */
+    public function isBotActive()
+    {
+        try {
+            // بررسی وجود جدول options
+            $tableExists = DB::rawQuery("SELECT EXISTS (
+                SELECT FROM information_schema.tables 
+                WHERE table_schema = 'public'
+                AND table_name = 'options'
+            ) as exists");
+            
+            if (!$tableExists[0]['exists']) {
+                DB::rawQuery("
+                    CREATE TABLE IF NOT EXISTS options (
+                        id SERIAL PRIMARY KEY,
+                        option_name VARCHAR(100) NOT NULL UNIQUE,
+                        option_value TEXT,
+                        created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                        updated_at TIMESTAMP
+                    )
+                ");
+                
+                // مقداردهی اولیه گزینه‌ها
+                DB::rawQuery("
+                    INSERT INTO options (option_name, option_value)
+                    VALUES ('bot_active', 'true')
+                    ON CONFLICT (option_name) DO NOTHING
+                ");
+                
+                return true;
+            }
+            
+            // دریافت مقدار گزینه
+            $option = DB::table('options')
+                ->where('option_name', 'bot_active')
+                ->first();
+                
+            if (!$option) {
+                // اگر گزینه وجود نداشت، آن را ایجاد کنیم
+                DB::table('options')->insert([
+                    'option_name' => 'bot_active',
+                    'option_value' => 'true',
+                    'created_at' => date('Y-m-d H:i:s')
+                ]);
+                
+                return true;
+            }
+            
+            return $option['option_value'] === 'true';
+            
+        } catch (\Exception $e) {
+            error_log("Error in isBotActive: " . $e->getMessage());
+            // در صورت خطا، فرض می‌کنیم ربات فعال است
+            return true;
+        }
+    }
+    
+    /**
+     * تغییر وضعیت فعال بودن ربات
+     * @param bool $active وضعیت جدید
+     * @return bool موفقیت عملیات
+     */
+    public function setBotActive($active)
+    {
+        try {
+            // بررسی دسترسی ادمین
+            if (!$this->isAdmin() || !$this->hasPermission('can_manage_bot_settings')) {
+                return false;
+            }
+            
+            // بررسی وجود جدول options
+            $tableExists = DB::rawQuery("SELECT EXISTS (
+                SELECT FROM information_schema.tables 
+                WHERE table_schema = 'public'
+                AND table_name = 'options'
+            ) as exists");
+            
+            if (!$tableExists[0]['exists']) {
+                DB::rawQuery("
+                    CREATE TABLE IF NOT EXISTS options (
+                        id SERIAL PRIMARY KEY,
+                        option_name VARCHAR(100) NOT NULL UNIQUE,
+                        option_value TEXT,
+                        created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                        updated_at TIMESTAMP
+                    )
+                ");
+            }
+            
+            // بررسی آیا گزینه وجود دارد
+            $optionExists = DB::table('options')
+                ->where('option_name', 'bot_active')
+                ->exists();
+                
+            if ($optionExists) {
+                // آپدیت گزینه
+                DB::table('options')
+                    ->where('option_name', 'bot_active')
+                    ->update([
+                        'option_value' => $active ? 'true' : 'false',
+                        'updated_at' => date('Y-m-d H:i:s')
+                    ]);
+            } else {
+                // ایجاد گزینه
+                DB::table('options')->insert([
+                    'option_name' => 'bot_active',
+                    'option_value' => $active ? 'true' : 'false',
+                    'created_at' => date('Y-m-d H:i:s')
+                ]);
+            }
+            
+            return true;
+            
+        } catch (\Exception $e) {
+            error_log("Error in setBotActive: " . $e->getMessage());
+            return false;
+        }
+    }
+    
+    /**
      * ارسال پیام تلگرام (متد کمکی)
      */
     private function sendTelegramMessage($chatId, $message, $keyboard = null)
