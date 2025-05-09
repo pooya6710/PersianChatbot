@@ -1311,7 +1311,10 @@ while (true) {
 // دریافت اطلاعات ربات
 $botInfo = getBotInfo($_ENV['TELEGRAM_TOKEN']);
 $botUsername = isset($botInfo['username']) ? $botInfo['username'] : 'your_bot';
-$message .= "https://t.me/" . $botUsername . "?start=" . $userData['id'];
+
+// ساخت لینک رفرال
+$referralLink = "https://t.me/" . $botUsername . "?start=" . $userData['id'];
+$message .= "`" . $referralLink . "`";
                         
                         editMessageText($_ENV['TELEGRAM_TOKEN'], $chat_id, $message_id, $message);
                         answerCallbackQuery($_ENV['TELEGRAM_TOKEN'], $callback_query['id']);
