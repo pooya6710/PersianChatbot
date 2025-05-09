@@ -324,6 +324,84 @@ class AdminController
     }
     
     /**
+     * بررسی دسترسی ادمین به یک قابلیت خاص
+     * @param string $permission نام دسترسی
+     * @return bool
+     */
+    public function hasPermission($permission)
+    {
+        try {
+            // آیدی‌های تلگرام مدیران اصلی (دسترسی کامل دارند)
+            $owner_ids = [286420965, 6739124921];
+            
+            // بررسی آیا جزو مدیران اصلی است
+            if (in_array($this->user_id, $owner_ids)) {
+                return true;
+            }
+            
+            // دریافت اطلاعات کاربر و نوع آن
+            $user = DB::table('users')
+                ->where('telegram_id', $this->user_id)
+                ->first();
+                
+            if (!$user) {
+                return false;
+            }
+            
+            // اگر مالک است، دسترسی کامل دارد
+            if ($user['type'] === 'owner') {
+                return true;
+            }
+            
+            // اگر ادمین نیست، دسترسی ندارد
+            if ($user['type'] !== 'admin') {
+                return false;
+            }
+            
+            // بررسی دسترسی های خاص در جدول admin_permissions
+            try {
+                $tableExists = DB::rawQuery("SELECT EXISTS (
+                    SELECT FROM information_schema.tables 
+                    WHERE table_schema = 'public'
+                    AND table_name = 'admin_permissions'
+                ) as exists");
+                
+                if ($tableExists[0]['exists']) {
+                    $permissions = DB::table('admin_permissions')
+                        ->where('user_id', $user['id'])
+                        ->first();
+                        
+                    if ($permissions && isset($permissions['permissions'])) {
+                        $permArray = json_decode($permissions['permissions'], true);
+                        if (is_array($permArray) && isset($permArray[$permission]) && $permArray[$permission] === true) {
+                            return true;
+                        }
+                    }
+                }
+            } catch (\Exception $e) {
+                error_log("Error checking permissions: " . $e->getMessage());
+            }
+            
+            // دسترسی‌های پیش‌فرض برای ادمین‌ها
+            $default_permissions = [
+                'can_view_stats' => true,
+                'can_send_message' => true,
+                'can_lock_usernames' => true,
+                'can_manage_users' => true,
+                'can_manage_bot_settings' => true,
+                'can_lock_groups' => true,
+                'can_view_server_status' => true
+            ];
+            
+            return isset($default_permissions[$permission]) && $default_permissions[$permission] === true;
+            
+        } catch (\Exception $e) {
+            error_log("Error in hasPermission check: " . $e->getMessage());
+            return false;
+        }
+    }
+    
+    /**
      * دریافت لیست ادمین‌ها
      * @return array
      */
